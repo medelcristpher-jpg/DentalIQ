@@ -16,7 +16,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 const GOOGLE_CLIENT_ID = '33863186131-3rgcbifmp7sjkacuhqinr41nkbca7v09.apps.googleusercontent.com';
 const AI_PROVIDER = 'groq'; // 'claude' | 'groq' | 'openai' | 'gemini'
 const AI_MODEL = 'llama-3.3-70b-versatile';
-const AI_API_KEY = 'gsk_GgF94WGwrVjrX2sYD5mrWGdyb3FY0ccWjS9jhKEWdsG5gc...';
+const AI_API_KEY = 'gsk_GgF94WGwrVjrX2sYD5mrWGdyb3FY0ccWjS9jhKEWdsG5gc';
 
 // ─────────────────────────────────────────────────────────────────
 
