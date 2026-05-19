@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 const GOOGLE_CLIENT_ID = '33863186131-3rgcbifmp7sjkacuhqinr41nkbca7v09.apps.googleusercontent.com'
 const AI_PROVIDER = 'groq'
 const AI_MODEL = 'llama-3.3-70b-versatile'
-const AI_API_KEY = 'gsk_GgF94WGwrVjrX2sYD5mrWGdyb3FY0ccWjS9jhKEWdsG5gc'
+const AI_API_KEY = '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'
 
 const C = {
   bg:'#F8F7F4',card:'#FFFFFF',border:'rgba(0,0,0,0.08)',
