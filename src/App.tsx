@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 const GOOGLE_CLIENT_ID = '33863186131-3rgcbifmp7sjkacuhqinr41nkbca7v09.apps.googleusercontent.com'
 const AI_PROVIDER = 'groq'
 const AI_MODEL = 'llama-3.3-70b-versatile'
-const AI_API_KEY = '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'
+const AI_API_KEY = 'gsk_GgF94WGwrVjrX2sYD5mrWGdyb3FY0ccWjS9jhKEWdsG5gc'
 
 const C = {
   bg:'#F8F7F4',card:'#FFFFFF',border:'rgba(0,0,0,0.08)',
@@ -15,9 +15,11 @@ const C = {
   text:'#111827',sub:'#6B7280',light:'#9CA3AF',
   green:'#059669',greenL:'#D1FAE5',
   white:'#FFFFFF',shadow:'rgba(0,0,0,0.06)',
+  purple:'#7C3AED',purpleL:'#EDE9FE',
 }
 
 const clp = (n) => {
+  if (isNaN(n)||n===null) return '$0'
   if (Math.abs(n)>=1e6) return `$${(n/1e6).toFixed(1)}M`
   if (Math.abs(n)>=1e3) return `$${Math.round(n/1e3).toLocaleString('es-CL')}K`
   return `$${Math.round(n).toLocaleString('es-CL')}`
@@ -96,7 +98,7 @@ async function driveReadContent(t, file) {
   else
     url = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`
   const r = await fetch(url, { headers: { Authorization: `Bearer ${t}` } })
-  return (await r.text()).slice(0, 6000)
+  return (await r.text()).slice(0, 8000)
 }
 
 async function getOrCreate(t, name, parentId) {
@@ -110,45 +112,27 @@ async function getOrCreate(t, name, parentId) {
   return (await driveCreate(t, body)).id
 }
 
-// ── Crear planilla con contenido ──────────────────────────────────
 async function createSheetIfNotExists(t, name, parentId, rows) {
-  // Verificar si ya existe
   const q = `name='${name}' and '${parentId}' in parents and trashed=false`
   const ex = await driveFind(t, q)
   if (ex.length) return ex[0].id
-
-  // Crear el archivo Google Sheets
-  const file = await driveCreate(t, {
-    name,
-    mimeType: 'application/vnd.google-apps.spreadsheet',
-    parents: [parentId]
-  })
-
+  const file = await driveCreate(t, { name, mimeType: 'application/vnd.google-apps.spreadsheet', parents: [parentId] })
   if (!file.id) return null
-
-  // Agregar contenido con la API de Sheets
   try {
-    await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${file.id}/values/A1?valueInputOption=USER_ENTERED`,
-      {
-        method: 'PUT',
-        headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ values: rows, majorDimension: 'ROWS' })
-      }
-    )
-  } catch(e) {
-    console.error('Error agregando contenido a sheet:', e)
-  }
-
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${file.id}/values/A1?valueInputOption=USER_ENTERED`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: rows, majorDimension: 'ROWS' })
+    })
+  } catch(e) { console.error('Sheet content error:', e) }
   return file.id
 }
 
-// ── Configurar Drive con carpetas y plantillas ────────────────────
 const FOLDERS = [
   { name:'Ingresos', emoji:'💰' },
   { name:'Gastos', emoji:'💳' },
-  { name:'Facturas', emoji:'🧾' },
-  { name:'Proveedores', emoji:'📦' },
+  { name:'Inventario Proveedores', emoji:'📦' },
+  { name:'Facturas por Pagar', emoji:'🧾' },
   { name:'Reportes', emoji:'📊' },
 ]
 
@@ -158,112 +142,88 @@ async function setupDrive(t) {
   const now = new Date()
   const año = now.getFullYear()
   const mes = now.toLocaleDateString('es-CL', { month: 'long' })
-  const mesNum = String(now.getMonth() + 1).padStart(2, '0')
   const hoy = now.toLocaleDateString('es-CL')
 
   for (const { name, emoji } of FOLDERS) {
     const id = await getOrCreate(t, name, rootId)
 
-    // Crear plantillas según carpeta
     if (name === 'Ingresos') {
       await createSheetIfNotExists(t, `Ingresos ${mes} ${año}`, id, [
-        // Fila 1: Instrucciones
-        ['📌 INSTRUCCIONES: Agrega aquí todos los ingresos de tu clínica. Un ingreso por fila. Puedes copiar este archivo para otros meses o años.', '', '', '', '', ''],
-        // Fila 2: Encabezados
-        ['Fecha', 'Nombre Paciente', 'Servicio Realizado', 'Monto (CLP)', 'Método de Pago', 'Notas'],
-        // Filas 3-5: Ejemplos
-        [hoy, 'María González', 'Ortodoncia - cuota mensual', '120000', 'Transferencia', 'Ejemplo - borra esta fila'],
-        [hoy, 'Carlos Pérez', 'Implante dental unitario', '850000', 'Tarjeta débito', 'Ejemplo - borra esta fila'],
-        [hoy, 'Ana Martínez', 'Limpieza dental + radiografías', '65000', 'Efectivo', 'Ejemplo - borra esta fila'],
-        // Fila 6: Separador
-        ['', '', '', '', '', ''],
-        // Fila 7: Recordatorio
-        ['✅ Desde aquí agrega tus propios ingresos →', '', '', '', '', ''],
+        ['📌 INSTRUCCIONES: Un ingreso por fila. Borra los ejemplos y agrega tus propios datos.','','','','',''],
+        ['Fecha','Nombre Paciente','Servicio Realizado','Monto (CLP)','Método de Pago','Notas'],
+        [hoy,'María González','Ortodoncia cuota mensual','120000','Transferencia','Ejemplo - borra esta fila'],
+        [hoy,'Carlos Pérez','Implante dental unitario','850000','Tarjeta débito','Ejemplo - borra esta fila'],
+        [hoy,'Ana Martínez','Limpieza + radiografías','65000','Efectivo','Ejemplo - borra esta fila'],
+        ['','','','','',''],['✅ Agrega tus ingresos aquí →','','','','',''],
       ])
-
-      // Plantilla año anterior
-      await createSheetIfNotExists(t, `Ingresos ${año - 1} (año anterior)`, id, [
-        ['📌 Usa este archivo para ingresar datos del año '+(año-1)+'. Misma estructura que el archivo actual.', '', '', '', '', ''],
-        ['Fecha', 'Nombre Paciente', 'Servicio Realizado', 'Monto (CLP)', 'Método de Pago', 'Notas'],
-        ['01/01/'+(año-1), 'Ejemplo paciente', 'Servicio de ejemplo', '100000', 'Efectivo', 'Ejemplo - borra esta fila'],
+      await createSheetIfNotExists(t, `Ingresos ${año-1} (año anterior)`, id, [
+        ['📌 Datos del año '+(año-1)+'. Misma estructura.','','','','',''],
+        ['Fecha','Nombre Paciente','Servicio Realizado','Monto (CLP)','Método de Pago','Notas'],
       ])
     }
 
     if (name === 'Gastos') {
       await createSheetIfNotExists(t, `Gastos ${mes} ${año}`, id, [
-        ['📌 INSTRUCCIONES: Agrega aquí todos los gastos de tu clínica. Un gasto por fila. Puedes copiar para otros meses.', '', '', '', '', ''],
-        ['Fecha', 'Descripción del Gasto', 'Categoría', 'Monto (CLP)', 'Proveedor / Empresa', 'Notas'],
-        [hoy, 'Compra insumos dentales', 'Insumos y materiales', '245000', '3M Chile', 'Ejemplo - borra esta fila'],
-        [hoy, 'Arriendo clínica', 'Arriendo', '450000', 'Inmobiliaria', 'Ejemplo - borra esta fila'],
-        [hoy, 'Sueldo asistente dental', 'Personal', '580000', 'Nombre empleado', 'Ejemplo - borra esta fila'],
-        ['', '', '', '', '', ''],
-        ['✅ Desde aquí agrega tus propios gastos →', '', '', '', '', ''],
+        ['📌 INSTRUCCIONES: Un gasto por fila. Borra los ejemplos y agrega tus datos.','','','','',''],
+        ['Fecha','Descripción del Gasto','Categoría','Monto (CLP)','Proveedor / Empresa','Notas'],
+        [hoy,'Compra insumos dentales','Insumos y materiales','245000','3M Chile','Ejemplo - borra esta fila'],
+        [hoy,'Arriendo clínica','Arriendo','450000','Inmobiliaria','Ejemplo - borra esta fila'],
+        [hoy,'Sueldo asistente dental','Personal','580000','Nombre empleado','Ejemplo - borra esta fila'],
+        ['','','','','',''],['✅ Agrega tus gastos aquí →','','','','',''],
       ])
-
-      await createSheetIfNotExists(t, `Gastos ${año - 1} (año anterior)`, id, [
-        ['📌 Usa este archivo para ingresar gastos del año '+(año-1)+'.', '', '', '', '', ''],
-        ['Fecha', 'Descripción del Gasto', 'Categoría', 'Monto (CLP)', 'Proveedor / Empresa', 'Notas'],
-        ['01/01/'+(año-1), 'Ejemplo gasto', 'Categoría ejemplo', '100000', 'Proveedor ejemplo', 'Ejemplo - borra esta fila'],
+      await createSheetIfNotExists(t, `Gastos ${año-1} (año anterior)`, id, [
+        ['📌 Datos del año '+(año-1)+'.','','','','',''],
+        ['Fecha','Descripción del Gasto','Categoría','Monto (CLP)','Proveedor / Empresa','Notas'],
       ])
     }
 
-    if (name === 'Facturas') {
-      await createSheetIfNotExists(t, `Registro de Facturas ${año}`, id, [
-        ['📌 INSTRUCCIONES: Registra aquí el número y detalle de tus facturas. Sube los PDFs directamente a esta carpeta.', '', '', '', '', '', ''],
-        ['N° Factura', 'Fecha', 'Proveedor', 'Descripción', 'Monto Neto (CLP)', 'IVA (CLP)', 'Total (CLP)'],
-        ['001', hoy, '3M Chile', 'Insumos dentales - adhesivos y composite', '200000', '38000', '238000'],
-        ['002', hoy, 'Septodont', 'Anestesia local Lidocaína 2%', '71429', '13571', '85000'],
-        ['003', hoy, 'Arriendos SpA', 'Arriendo clínica '+mes+' '+año, '378151', '71849', '450000'],
-        ['', '', '', '', '', '', ''],
-        ['✅ Agrega tus facturas aquí y sube el PDF a esta misma carpeta →', '', '', '', '', '', ''],
+    if (name === 'Inventario Proveedores') {
+      await createSheetIfNotExists(t, `Inventario de Insumos ${año}`, id, [
+        ['📌 Registra aquí todos los insumos que compras. DentaIQ puede buscar a qué proveedor compraste cada cosa.','','','','','',''],
+        ['Fecha Compra','Insumo / Producto','Proveedor','Precio Unitario (CLP)','Cantidad','Total (CLP)','Notas'],
+        [hoy,'Adhesivo dental 3M Single Bond','3M Chile','45000','3','135000','Ejemplo - borra esta fila'],
+        [hoy,'Anestesia Lidocaína 2% caja 50un','Septodont','85000','2','170000','Ejemplo - borra esta fila'],
+        [hoy,'Fresas de diamante set 10un','Dentsply','32000','5','160000','Ejemplo - borra esta fila'],
+        [hoy,'Guantes nitrilo talla M caja','Mercado Dental','18000','10','180000','Ejemplo - borra esta fila'],
+        ['','','','','','',''],['✅ Agrega tus compras aquí →','','','','','',''],
       ])
-    }
-
-    if (name === 'Proveedores') {
       await createSheetIfNotExists(t, `Lista de Proveedores ${año}`, id, [
-        ['📌 INSTRUCCIONES: Mantén actualizada esta lista con tus proveedores. Actualiza el precio cuando cambie para detectar alzas.', '', '', '', '', '', ''],
-        ['Proveedor', 'Producto / Servicio', 'Precio Unitario (CLP)', 'Última Compra', 'Teléfono', 'Email / Web', 'Notas'],
-        ['3M Chile', 'Insumos dentales generales', '245000', hoy, '+56 2 2345 6789', 'www.3m.cl', 'Ejemplo - actualiza con tus proveedores'],
-        ['Septodont', 'Anestesia local Lidocaína', '85000', hoy, '+56 2 2345 6790', 'www.septodont.cl', 'Ejemplo - actualiza con tus proveedores'],
-        ['Dentsply Sirona', 'Fresas y equipos', '320000', hoy, '+56 2 2345 6791', 'www.dentsply.cl', 'Ejemplo - actualiza con tus proveedores'],
-        ['', '', '', '', '', '', ''],
-        ['✅ Agrega tus propios proveedores aquí →', '', '', '', '', '', ''],
+        ['📌 Mantén actualizada esta lista con tus proveedores habituales.','','','','',''],
+        ['Proveedor','Producto Principal','Precio Referencia (CLP)','Teléfono','Email / Web','Notas'],
+        ['3M Chile','Insumos dentales generales','245000','+56 2 2345 6789','www.3m.cl','Ejemplo'],
+        ['Septodont','Anestesia local','85000','+56 2 2345 6790','www.septodont.cl','Ejemplo'],
+        ['Dentsply Sirona','Fresas y equipos','320000','+56 2 2345 6791','www.dentsply.cl','Ejemplo'],
       ])
+    }
 
-      await createSheetIfNotExists(t, `Historial de Precios ${año}`, id, [
-        ['📌 Registra aquí los cambios de precios de tus proveedores. DentaIQ detecta alzas automáticamente.', '', '', '', ''],
-        ['Proveedor', 'Producto', 'Precio Anterior (CLP)', 'Precio Nuevo (CLP)', 'Fecha Cambio', '% Variación'],
-        ['Septodont', 'Anestesia local', '72000', '85000', hoy, '+18%'],
-        ['3M Chile', 'Insumos generales', '218000', '245000', hoy, '+12%'],
-        ['Ultradent', 'Kit blanqueamiento', '95000', '102600', hoy, '+8%'],
+    if (name === 'Facturas por Pagar') {
+      await createSheetIfNotExists(t, `Facturas por Pagar ${año}`, id, [
+        ['📌 Registra aquí tus facturas pendientes de pago. Marca como Pagada cuando corresponda.','','','','','',''],
+        ['N° Factura','Fecha Emisión','Fecha Vencimiento','Proveedor','Descripción','Monto Total (CLP)','Estado'],
+        ['001',hoy,'','3M Chile','Insumos dentales mayo','238000','⏳ Pendiente'],
+        ['002',hoy,'','Arriendo SpA','Arriendo clínica mayo','535500','⏳ Pendiente'],
+        ['003',hoy,'','Dentalink','Software mensual','198170','✅ Pagada'],
+        ['','','','','','',''],['✅ Agrega tus facturas aquí →','','','','','',''],
       ])
     }
 
     if (name === 'Reportes') {
       await createSheetIfNotExists(t, `Resumen Anual ${año}`, id, [
-        ['📌 DentaIQ irá completando este resumen con tus datos. También puedes completarlo manualmente.', '', '', '', '', ''],
-        ['Mes', 'Total Ingresos (CLP)', 'Total Gastos (CLP)', 'Margen (CLP)', 'Margen %', 'Notas'],
-        ['Enero '+año, '', '', '', '', ''],
-        ['Febrero '+año, '', '', '', '', ''],
-        ['Marzo '+año, '', '', '', '', ''],
-        ['Abril '+año, '', '', '', '', ''],
-        ['Mayo '+año, '', '', '', '', ''],
-        ['Junio '+año, '', '', '', '', ''],
-        ['Julio '+año, '', '', '', '', ''],
-        ['Agosto '+año, '', '', '', '', ''],
-        ['Septiembre '+año, '', '', '', '', ''],
-        ['Octubre '+año, '', '', '', '', ''],
-        ['Noviembre '+año, '', '', '', '', ''],
-        ['Diciembre '+año, '', '', '', '', ''],
-        ['', '', '', '', '', ''],
-        ['TOTAL '+año, '', '', '', '', ''],
+        ['📌 DentaIQ irá completando este resumen. También puedes hacerlo manualmente.','','','','',''],
+        ['Mes','Total Ingresos (CLP)','Total Gastos (CLP)','Margen (CLP)','Margen %','Notas'],
+        ['Enero '+año,'','','','',''],['Febrero '+año,'','','','',''],
+        ['Marzo '+año,'','','','',''],['Abril '+año,'','','','',''],
+        ['Mayo '+año,'','','','',''],['Junio '+año,'','','','',''],
+        ['Julio '+año,'','','','',''],['Agosto '+año,'','','','',''],
+        ['Septiembre '+año,'','','','',''],['Octubre '+año,'','','','',''],
+        ['Noviembre '+año,'','','','',''],['Diciembre '+año,'','','','',''],
+        ['','','','','',''],['TOTAL '+año,'','','','',''],
       ])
     }
 
     const files = await driveListFiles(t, id)
     folders.push({ id, name, emoji, files })
   }
-
   return folders
 }
 
@@ -286,21 +246,11 @@ async function askAI(msgs, system) {
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type':'application/json','x-api-key':AI_API_KEY,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true' },
-      body: JSON.stringify({ model:AI_MODEL, max_tokens:1200, system, messages:msgs })
+      body: JSON.stringify({ model:AI_MODEL, max_tokens:1500, system, messages:msgs })
     })
     const d = await r.json()
     if (d.error) throw new Error(d.error.message)
     return d.content?.[0]?.text || ''
-  }
-  if (AI_PROVIDER === 'gemini') {
-    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${AI_MODEL}:generateContent?key=${AI_API_KEY}`, {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json' },
-      body: JSON.stringify({ system_instruction:{ parts:[{ text:system }] }, contents:msgs.map(m => ({ role: m.role==='assistant'?'model':'user', parts:[{ text:m.content }] })) })
-    })
-    const d = await r.json()
-    if (d.error) throw new Error(d.error.message)
-    return d.candidates?.[0]?.content?.parts?.[0]?.text || ''
   }
   throw new Error('Provider no configurado')
 }
@@ -328,12 +278,11 @@ function Welcome({ onLogin }) {
         <h1 style={{ margin:'0 0 6px', fontSize:32, fontWeight:800, color:C.text, letterSpacing:'-0.02em' }}>DentaIQ</h1>
         <p style={{ margin:0, fontSize:16, color:C.sub }}>Tu gerente financiero inteligente</p>
       </div>
-
       <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:16, marginBottom:48, maxWidth:680, width:'100%' }}>
         {[
-          ['📊','¿Estoy ganando?','Sabe exactamente cuánto entra y cuánto sale cada mes, sin hacer cálculos.'],
-          ['🤖','La IA te explica','Entiende tus finanzas en lenguaje simple, no en jerga contable.'],
-          ['☁️','Solo llena tus planillas','Al conectarte, DentaIQ crea tus carpetas y plantillas en Drive automáticamente.'],
+          ['📊','¿Estoy ganando?','La IA analiza tus planillas de Drive y te dice exactamente cómo va tu negocio.'],
+          ['🤖','La IA te explica','Pregúntale en lenguaje normal. Te responde sin jerga contable.'],
+          ['🔍','Busca tus insumos','¿A qué proveedor le compraste anestesia? DentaIQ lo encuentra al instante.'],
         ].map(([icon,title,desc]) => (
           <div key={title} style={{ background:C.white, borderRadius:16, padding:'20px', border:`1px solid ${C.border}`, boxShadow:`0 1px 4px ${C.shadow}` }}>
             <div style={{ fontSize:28, marginBottom:10 }}>{icon}</div>
@@ -342,11 +291,9 @@ function Welcome({ onLogin }) {
           </div>
         ))}
       </div>
-
       <div style={{ background:C.white, borderRadius:20, padding:'36px 40px', border:`1px solid ${C.border}`, boxShadow:`0 2px 12px ${C.shadow}`, width:'100%', maxWidth:400, textAlign:'center' }}>
         <div style={{ fontSize:15, fontWeight:700, color:C.text, marginBottom:4 }}>Empieza gratis hoy</div>
-        <div style={{ fontSize:13, color:C.sub, marginBottom:24 }}>Solo necesitas tu cuenta de Google</div>
-
+        <div style={{ fontSize:13, color:C.sub, marginBottom:24 }}>Al conectarte, DentaIQ crea tus carpetas y plantillas en Drive automáticamente</div>
         <button onClick={login} disabled={loading} style={{ width:'100%', display:'flex', alignItems:'center', justifyContent:'center', gap:12, background:C.white, color:'#3c4043', border:'1.5px solid #dadce0', borderRadius:12, padding:'14px 20px', fontSize:15, fontWeight:500, cursor:loading?'default':'pointer', marginBottom:12, boxShadow:'0 1px 3px rgba(0,0,0,0.08)', opacity:loading?0.7:1 }}>
           <svg width="20" height="20" viewBox="0 0 24 24">
             <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
@@ -354,18 +301,14 @@ function Welcome({ onLogin }) {
             <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
             <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
           </svg>
-          {loading ? 'Conectando y creando tus planillas...' : 'Continuar con Google'}
+          {loading ? 'Conectando...' : 'Continuar con Google'}
         </button>
-
         <button onClick={loginDemo} style={{ width:'100%', background:C.teal, color:'#fff', border:'none', borderRadius:12, padding:'14px 20px', fontSize:15, fontWeight:700, cursor:'pointer', marginBottom:16 }}>
           🚀 Ver demo ahora
         </button>
-
         {error && <div style={{ padding:'10px 14px', background:C.redL, borderRadius:8, fontSize:13, color:C.red, marginBottom:12 }}>{error}</div>}
-
-        <p style={{ margin:0, fontSize:11, color:C.light }}>Al conectarte, DentaIQ crea automáticamente tus<br/>carpetas y plantillas en Google Drive.</p>
+        <p style={{ margin:0, fontSize:11, color:C.light }}>Diseñado para clínicas dentales · Chile</p>
       </div>
-      <p style={{ marginTop:24, fontSize:12, color:C.light }}>Diseñado para clínicas dentales · Chile</p>
     </div>
   )
 }
@@ -373,12 +316,11 @@ function Welcome({ onLogin }) {
 // ── Onboarding ────────────────────────────────────────────────────
 function Onboarding({ user, onDone }) {
   const [step, setStep] = useState(0)
-  const año = new Date().getFullYear()
   const steps = [
-    { icon:'👋', title:`Hola ${user.name.split(' ')[0]}`, desc:'DentaIQ ya creó tus carpetas y planillas en Google Drive. Solo tienes que abrirlas y llenarlas.' },
-    { icon:'📊', title:'Tus planillas están listas', desc:`En tu Drive encontrarás la carpeta "DentaIQ" con planillas de Ingresos, Gastos, Facturas y Proveedores para ${año}. Cada una tiene ejemplos para que sepas qué agregar.` },
-    { icon:'✏️', title:'Solo llena tus datos', desc:'Abre la planilla de Ingresos → borra los ejemplos → agrega tus propios ingresos del mes. Mismo con Gastos. La IA lo analiza todo automáticamente.' },
-    { icon:'🤖', title:'La IA te explica todo', desc:'¿Cuánto gané este mes? ¿En qué me gasto más? ¿Conviene comprar equipos? Escríbelo en lenguaje normal y tu consejero IA te responde al instante.' },
+    { icon:'👋', title:`Hola ${user.name.split(' ')[0]}`, desc:'DentaIQ creó tus carpetas y plantillas en Google Drive. Todo listo para empezar.' },
+    { icon:'📊', title:'Sube tus planillas reales', desc:'Abre Drive → carpeta DentaIQ → abre "Ingresos" o "Gastos" → pega tus datos del mes. DentaIQ los lee automáticamente.' },
+    { icon:'🔍', title:'Busca tus insumos', desc:'En la sección Buscador puedes encontrar a qué proveedor le compraste cada insumo, en qué fecha y a qué precio.' },
+    { icon:'🤖', title:'La IA te explica todo', desc:'Pregúntale lo que quieras sobre tu negocio en lenguaje normal. La IA lee tus planillas y responde con números reales.' },
   ]
   const s = steps[step]
   return (
@@ -415,24 +357,23 @@ function Dashboard({ user, txs, folders, aiSummary, loadingAI }) {
       </div>
 
       <div style={{ background:margen>=0?C.tealL:C.redL, borderRadius:20, padding:'24px 28px', marginBottom:24, border:`1px solid ${margen>=0?C.teal+'33':C.red+'33'}` }}>
-        <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:8 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:12 }}>
           <span style={{ fontSize:32 }}>{margen>=0?'✅':'⚠️'}</span>
           <div>
             <div style={{ fontSize:18, fontWeight:800, color:margen>=0?C.tealD:C.red }}>
-              {txs.length===0?'Aún no hay datos':'Tu clínica está '+(margen>=0?'ganando dinero':'en pérdida este mes')}
+              {txs.length===0?'Sube tus planillas en Drive para ver tu situación':'Tu clínica está '+(margen>=0?'ganando dinero este mes':'en pérdida este mes')}
             </div>
             {txs.length>0&&<div style={{ fontSize:14, color:margen>=0?C.teal:C.red }}>Margen: {pct.toFixed(1)}% — {pct>40?'excelente 🌟':pct>25?'bien, puede mejorar':'necesita atención'}</div>}
           </div>
         </div>
-        {txs.length===0&&<div style={{ fontSize:14, color:C.sub }}>Llena tus planillas en Drive o agrega transacciones manualmente para ver tus estadísticas.</div>}
       </div>
 
       {txs.length>0&&(
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:16, marginBottom:24 }}>
           {[
-            { label:'Lo que entró este mes', value:clp(ing), icon:'📈', color:C.green, bg:C.greenL },
-            { label:'Lo que salió este mes', value:clp(gas), icon:'📉', color:C.red, bg:C.redL },
-            { label:'Lo que te queda', value:clp(margen), icon:margen>=0?'💰':'🚨', color:margen>=0?C.teal:C.red, bg:margen>=0?C.tealL:C.redL },
+            { label:'Lo que entró', value:clp(ing), icon:'📈', color:C.green, bg:C.greenL },
+            { label:'Lo que salió', value:clp(gas), icon:'📉', color:C.red, bg:C.redL },
+            { label:'Lo que queda', value:clp(margen), icon:margen>=0?'💰':'🚨', color:margen>=0?C.teal:C.red, bg:margen>=0?C.tealL:C.redL },
           ].map(k=>(
             <div key={k.label} style={{ background:k.bg, borderRadius:16, padding:'20px 22px', border:`1px solid ${k.color}33` }}>
               <div style={{ fontSize:28, marginBottom:8 }}>{k.icon}</div>
@@ -447,14 +388,14 @@ function Dashboard({ user, txs, folders, aiSummary, loadingAI }) {
         <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:14 }}>
           <div style={{ width:36, height:36, borderRadius:10, background:C.teal, display:'flex', alignItems:'center', justifyContent:'center', fontSize:18 }}>🤖</div>
           <div>
-            <div style={{ fontSize:14, fontWeight:700, color:C.text }}>Lo que dice tu consejero IA</div>
-            <div style={{ fontSize:12, color:C.sub }}>Análisis automático basado en tus datos</div>
+            <div style={{ fontSize:14, fontWeight:700, color:C.text }}>Tu consejero IA</div>
+            <div style={{ fontSize:12, color:C.sub }}>Análisis basado en tus planillas de Drive</div>
           </div>
           {loadingAI&&<div style={{ marginLeft:'auto', fontSize:12, color:C.sub }}>Analizando...</div>}
         </div>
         {aiSummary
           ?<p style={{ margin:0, fontSize:14, color:C.text, lineHeight:1.7, whiteSpace:'pre-wrap' }}>{aiSummary}</p>
-          :<p style={{ margin:0, fontSize:14, color:C.sub, fontStyle:'italic' }}>{totalFiles===0?'Llena tus planillas en Drive y la IA analizará tus datos automáticamente.':'Cargando análisis...'}</p>
+          :<p style={{ margin:0, fontSize:14, color:C.sub, fontStyle:'italic' }}>{totalFiles===0?'Sube tus planillas en Drive y la IA las analizará automáticamente.':'Ve al Consejero IA y pregúntale sobre tu negocio.'}</p>
         }
       </div>
 
@@ -464,7 +405,7 @@ function Dashboard({ user, txs, folders, aiSummary, loadingAI }) {
           {folders.map(f=>(
             <div key={f.id} style={{ textAlign:'center', padding:'12px 8px', background:C.bg, borderRadius:12, border:`1px solid ${C.border}` }}>
               <div style={{ fontSize:24, marginBottom:4 }}>{f.emoji}</div>
-              <div style={{ fontSize:12, color:C.text, fontWeight:500, marginBottom:2 }}>{f.name}</div>
+              <div style={{ fontSize:11, color:C.text, fontWeight:500, marginBottom:2 }}>{f.name}</div>
               <div style={{ fontSize:11, color:f.files.length>0?C.teal:C.light }}>{f.files.length>0?`${f.files.length} archivos`:'Vacía'}</div>
             </div>
           ))}
@@ -483,18 +424,34 @@ function MisNumeros({ txs, setTxs }) {
   const CATS_I = ['Servicios dentales','Ortodoncia','Implantes','Blanqueamiento','Convenios','Otros ingresos']
   const CATS_G = ['Insumos y materiales','Personal','Arriendo','Equipos','Servicios básicos','Publicidad','Contabilidad','Otros gastos']
   const inp = { width:'100%', background:C.bg, border:`1px solid ${C.border}`, color:C.text, borderRadius:8, padding:'10px 12px', fontSize:14, fontFamily:'inherit', outline:'none' }
+
+  // Dashboard data
+  const catGastos = CATS_G.map(cat => ({
+    cat, total: txs.filter(t=>t.tipo==='G'&&t.cat===cat).reduce((s,t)=>s+t.monto,0)
+  })).filter(c=>c.total>0).sort((a,b)=>b.total-a.total)
+
+  const catIngresos = CATS_I.map(cat => ({
+    cat, total: txs.filter(t=>t.tipo==='I'&&t.cat===cat).reduce((s,t)=>s+t.monto,0)
+  })).filter(c=>c.total>0).sort((a,b)=>b.total-a.total)
+
+  const maxGasto = catGastos[0]?.total || 1
+  const maxIngreso = catIngresos[0]?.total || 1
+
   const guardar = () => {
     if (!form.desc.trim()||!form.monto) return
     setTxs(p=>[{ id:Date.now(), tipo:form.tipo, desc:form.desc, cat:form.cat, monto:parseInt(form.monto), fecha:new Date().toLocaleDateString('es-CL'), fuente:'manual' },...p])
     setForm({ tipo:'I', desc:'', cat:'Servicios dentales', monto:'' }); setOpen(false)
   }
+
   return (
-    <div style={{ padding:'32px', maxWidth:840 }}>
+    <div style={{ padding:'32px', maxWidth:900 }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:24 }}>
         <div><h1 style={{ margin:0, fontSize:24, fontWeight:800, color:C.text }}>Mis Números</h1><p style={{ margin:'4px 0 0', fontSize:14, color:C.sub }}>Registro rápido de ingresos y gastos del día</p></div>
         <button onClick={()=>setOpen(!open)} style={{ background:C.teal, color:'#fff', border:'none', borderRadius:10, padding:'10px 20px', fontSize:14, fontWeight:700, cursor:'pointer' }}>+ Agregar</button>
       </div>
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:20 }}>
+
+      {/* KPIs */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:24 }}>
         {[['Lo que entró',ing,C.green,C.greenL,'📈'],['Lo que salió',gas,C.red,C.redL,'📉'],['Balance',ing-gas,ing-gas>=0?C.teal:C.red,ing-gas>=0?C.tealL:C.redL,ing-gas>=0?'✅':'⚠️']].map(([l,v,c,bg,ico])=>(
           <div key={l} style={{ background:bg, borderRadius:14, padding:'16px 18px', border:`1px solid ${c}33` }}>
             <div style={{ fontSize:20, marginBottom:6 }}>{ico}</div>
@@ -503,6 +460,71 @@ function MisNumeros({ txs, setTxs }) {
           </div>
         ))}
       </div>
+
+      {/* Dashboard de categorías */}
+      {txs.length > 0 && (
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, marginBottom:24 }}>
+          {/* Gastos por categoría */}
+          <div style={{ background:C.white, borderRadius:16, padding:'20px', border:`1px solid ${C.border}`, boxShadow:`0 1px 6px ${C.shadow}` }}>
+            <div style={{ fontSize:13, fontWeight:700, color:C.text, marginBottom:16 }}>📉 Gastos por categoría</div>
+            {catGastos.length===0
+              ? <div style={{ fontSize:13, color:C.sub }}>Sin gastos registrados</div>
+              : catGastos.map(({cat,total})=>(
+                <div key={cat} style={{ marginBottom:10 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4 }}>
+                    <span style={{ fontSize:12, color:C.text }}>{cat}</span>
+                    <span style={{ fontSize:12, fontWeight:700, color:C.red }}>{clp(total)}</span>
+                  </div>
+                  <div style={{ height:6, background:C.bg, borderRadius:3, overflow:'hidden' }}>
+                    <div style={{ height:'100%', width:`${(total/maxGasto)*100}%`, background:C.red, borderRadius:3, transition:'width 0.5s' }}/>
+                  </div>
+                </div>
+              ))
+            }
+          </div>
+
+          {/* Ingresos por categoría */}
+          <div style={{ background:C.white, borderRadius:16, padding:'20px', border:`1px solid ${C.border}`, boxShadow:`0 1px 6px ${C.shadow}` }}>
+            <div style={{ fontSize:13, fontWeight:700, color:C.text, marginBottom:16 }}>📈 Ingresos por categoría</div>
+            {catIngresos.length===0
+              ? <div style={{ fontSize:13, color:C.sub }}>Sin ingresos registrados</div>
+              : catIngresos.map(({cat,total})=>(
+                <div key={cat} style={{ marginBottom:10 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4 }}>
+                    <span style={{ fontSize:12, color:C.text }}>{cat}</span>
+                    <span style={{ fontSize:12, fontWeight:700, color:C.green }}>{clp(total)}</span>
+                  </div>
+                  <div style={{ height:6, background:C.bg, borderRadius:3, overflow:'hidden' }}>
+                    <div style={{ height:'100%', width:`${(total/maxIngreso)*100}%`, background:C.green, borderRadius:3, transition:'width 0.5s' }}/>
+                  </div>
+                </div>
+              ))
+            }
+          </div>
+
+          {/* Top gasto */}
+          {catGastos[0] && (
+            <div style={{ background:C.redL, borderRadius:14, padding:'14px 18px', border:`1px solid ${C.red}33` }}>
+              <div style={{ fontSize:12, color:C.sub, marginBottom:4 }}>🔴 Mayor gasto</div>
+              <div style={{ fontSize:14, fontWeight:700, color:C.red }}>{catGastos[0].cat}</div>
+              <div style={{ fontSize:20, fontWeight:800, color:C.red }}>{clp(catGastos[0].total)}</div>
+              <div style={{ fontSize:11, color:C.sub, marginTop:4 }}>{gas>0?((catGastos[0].total/gas)*100).toFixed(1)+'% de tus gastos':''}</div>
+            </div>
+          )}
+
+          {/* Top ingreso */}
+          {catIngresos[0] && (
+            <div style={{ background:C.greenL, borderRadius:14, padding:'14px 18px', border:`1px solid ${C.green}33` }}>
+              <div style={{ fontSize:12, color:C.sub, marginBottom:4 }}>🟢 Mayor ingreso</div>
+              <div style={{ fontSize:14, fontWeight:700, color:C.green }}>{catIngresos[0].cat}</div>
+              <div style={{ fontSize:20, fontWeight:800, color:C.green }}>{clp(catIngresos[0].total)}</div>
+              <div style={{ fontSize:11, color:C.sub, marginTop:4 }}>{ing>0?((catIngresos[0].total/ing)*100).toFixed(1)+'% de tus ingresos':''}</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Formulario */}
       {open&&(
         <div style={{ background:C.white, borderRadius:16, padding:24, marginBottom:16, border:`1px solid ${C.border}`, boxShadow:`0 2px 8px ${C.shadow}` }}>
           <div style={{ fontSize:15, fontWeight:700, color:C.text, marginBottom:16 }}>¿Qué quieres registrar?</div>
@@ -538,15 +560,18 @@ function MisNumeros({ txs, setTxs }) {
           </div>
         </div>
       )}
+
+      {/* Lista */}
       {txs.length===0
         ?<div style={{ background:C.white, borderRadius:16, padding:'40px', textAlign:'center', border:`2px dashed ${C.border}` }}>
           <div style={{ fontSize:40, marginBottom:12 }}>📋</div>
           <div style={{ fontSize:15, fontWeight:600, color:C.text, marginBottom:6 }}>Nada registrado aún</div>
-          <div style={{ fontSize:13, color:C.sub }}>Agrega un ingreso o gasto rápido, o llena tus planillas en Drive</div>
+          <div style={{ fontSize:13, color:C.sub }}>Agrega un ingreso o gasto rápido, o sube tus planillas en Drive</div>
         </div>
         :<div style={{ background:C.white, borderRadius:16, border:`1px solid ${C.border}`, overflow:'hidden', boxShadow:`0 1px 6px ${C.shadow}` }}>
-          {txs.map((tx,i)=>(
-            <div key={tx.id} style={{ display:'flex', alignItems:'center', gap:14, padding:'14px 20px', borderBottom:i<txs.length-1?`1px solid ${C.border}`:'none' }}>
+          <div style={{ padding:'12px 20px', borderBottom:`1px solid ${C.border}`, fontSize:13, fontWeight:700, color:C.text }}>Últimas transacciones</div>
+          {txs.slice(0,20).map((tx,i)=>(
+            <div key={tx.id} style={{ display:'flex', alignItems:'center', gap:14, padding:'14px 20px', borderBottom:i<Math.min(txs.length,20)-1?`1px solid ${C.border}`:'none' }}>
               <div style={{ width:40, height:40, borderRadius:10, background:tx.tipo==='I'?C.greenL:C.redL, display:'flex', alignItems:'center', justifyContent:'center', fontSize:18, flexShrink:0 }}>{tx.tipo==='I'?'📈':'📉'}</div>
               <div style={{ flex:1, minWidth:0 }}>
                 <div style={{ fontSize:14, color:C.text, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{tx.desc}</div>
@@ -561,23 +586,90 @@ function MisNumeros({ txs, setTxs }) {
   )
 }
 
-// ── Consejero IA ──────────────────────────────────────────────────
+// ── Consejero IA — lee Drive automáticamente ──────────────────────
 function Consejero({ user, txs, folders }) {
+  const CHAT_KEY = `dentaiq_chat_${user.email}`
   const ing = txs.filter(t=>t.tipo==='I').reduce((s,t)=>s+t.monto,0)
   const gas = txs.filter(t=>t.tipo==='G').reduce((s,t)=>s+t.monto,0)
-  const totalFiles = folders.reduce((s,f)=>s+f.files.length,0)
-  const system = `Eres el consejero financiero de ${user.name}, dueño/a de una clínica dental en Chile.
-Habla como un amigo experto, en lenguaje simple sin jerga contable. La persona NO estudió administración.
-DATOS: Ingresos ${clp(ing)}, Gastos ${clp(gas)}, Balance ${clp(ing-gas)} (${ing>0?(((ing-gas)/ing)*100).toFixed(1)+'%':'sin datos'}).
-Archivos en Drive: ${totalFiles} (${folders.map(f=>`${f.name}: ${f.files.length}`).join(', ')}).
-Responde con emojis, máx 200 palabras, español chileno natural. Da siempre un consejo concreto accionable.`
-
-  const SUGERENCIAS = ['¿Estoy ganando suficiente?','¿En qué me gasto más?','¿Qué hago para ganar más?','Explícame mi situación','¿Cuándo contratar personal?','¿Me conviene equipo nuevo?']
-  const [msgs, setMsgs] = useState([{ role:'assistant', content:`Hola ${user.name.split(' ')[0]} 👋 Soy tu consejero financiero. ¿Qué quieres saber sobre tu negocio?` }])
+  const [driveContext, setDriveContext] = useState('')
+  const [loadingDrive, setLoadingDrive] = useState(false)
+  const [msgs, setMsgs] = useState(() => {
+    try {
+      const saved = localStorage.getItem(CHAT_KEY)
+      return saved ? JSON.parse(saved) : [{ role:'assistant', content:`Hola ${user.name.split(' ')[0]} 👋 Soy tu consejero financiero. Estoy leyendo tus planillas de Drive...` }]
+    } catch { return [{ role:'assistant', content:`Hola ${user.name.split(' ')[0]} 👋 ¿Qué quieres saber sobre tu negocio?` }] }
+  })
   const [inp, setInp] = useState('')
   const [loading, setLoading] = useState(false)
   const endRef = useRef(null)
-  useEffect(()=>{ endRef.current?.scrollIntoView({ behavior:'smooth' }) }, [msgs])
+
+  // Guardar historial automáticamente
+  useEffect(() => {
+    try { localStorage.setItem(CHAT_KEY, JSON.stringify(msgs.slice(-50))) } catch {}
+  }, [msgs])
+
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior:'smooth' }) }, [msgs])
+
+  // Leer Drive automáticamente al abrir
+  useEffect(() => {
+    if (user.token === 'demo' || folders.length === 0) return
+    const loadContext = async () => {
+      setLoadingDrive(true)
+      let ctx = ''
+      try {
+        for (const folder of folders) {
+          if (folder.name === 'Ingresos' || folder.name === 'Gastos') {
+            for (const file of folder.files.slice(0,2)) {
+              if (file.mimeType.includes('spreadsheet')) {
+                const content = await driveReadContent(user.token, file)
+                ctx += `\n\n=== ${folder.name}: ${file.name} ===\n${content.slice(0,3000)}`
+              }
+            }
+          }
+        }
+        if (ctx) {
+          setDriveContext(ctx)
+          setMsgs(prev => {
+            const last = prev[prev.length-1]
+            if (last?.role==='assistant'&&last.content.includes('leyendo')) {
+              return [...prev.slice(0,-1), { role:'assistant', content:`Hola ${user.name.split(' ')[0]} 👋 Ya leí tus planillas de Drive. Tengo datos de tus ingresos y gastos. ¿Qué quieres saber? 📊` }]
+            }
+            return prev
+          })
+        } else {
+          setMsgs(prev => {
+            const last = prev[prev.length-1]
+            if (last?.role==='assistant'&&last.content.includes('leyendo')) {
+              return [...prev.slice(0,-1), { role:'assistant', content:`Hola ${user.name.split(' ')[0]} 👋 No encontré planillas con datos en Drive aún. Sube tus archivos de Ingresos y Gastos y podré analizarlos. ¿O tienes alguna pregunta? 🤔` }]
+            }
+            return prev
+          })
+        }
+      } catch(e) { console.error('Drive read error:', e) }
+      setLoadingDrive(false)
+    }
+    loadContext()
+  }, [folders])
+
+  const system = `Eres el consejero financiero de ${user.name}, dueño/a de una clínica dental en Chile.
+Hablas como un amigo experto, en lenguaje simple sin jerga contable. La persona NO estudió administración.
+
+DATOS REGISTRADOS EN APP:
+- Ingresos manuales: ${clp(ing)} CLP
+- Gastos manuales: ${clp(gas)} CLP
+- Balance: ${clp(ing-gas)} CLP
+
+${driveContext ? `DATOS REALES DE DRIVE (planillas del usuario):
+${driveContext}` : 'Drive: Sin planillas cargadas aún.'}
+
+INSTRUCCIONES:
+- Usa los datos de Drive cuando estén disponibles — son los más reales y actualizados
+- Habla como amigo, usa emojis, máx 250 palabras
+- Da siempre UN consejo concreto y accionable
+- Si hay datos de Drive, menciona cifras específicas de esas planillas
+- Responde en español chileno natural`
+
+  const SUGERENCIAS = ['¿Estoy ganando suficiente?','¿En qué me gasto más?','Analiza mis ingresos de Drive','¿Cuál es mi margen real?','¿Qué puedo mejorar?','¿Me conviene equipo nuevo?']
 
   const send = async (texto) => {
     const t = (texto||inp).trim(); if (!t||loading) return
@@ -593,12 +685,24 @@ Responde con emojis, máx 200 palabras, español chileno natural. Da siempre un 
     setLoading(false)
   }
 
+  const clearHistory = () => {
+    const init = [{ role:'assistant', content:`Hola ${user.name.split(' ')[0]} 👋 Historial borrado. ¿En qué te ayudo?` }]
+    setMsgs(init)
+    try { localStorage.setItem(CHAT_KEY, JSON.stringify(init)) } catch {}
+  }
+
   return (
-    <div style={{ display:'flex', flexDirection:'column', height:'100vh', maxWidth:800, padding:'0 32px' }}>
-      <div style={{ padding:'32px 0 20px' }}>
-        <h1 style={{ margin:0, fontSize:24, fontWeight:800, color:C.text }}>Tu Consejero IA 🤖</h1>
-        <p style={{ margin:'4px 0 0', fontSize:14, color:C.sub }}>Pregúntale lo que quieras sobre tu negocio, en tus palabras</p>
+    <div style={{ display:'flex', flexDirection:'column', height:'100vh', maxWidth:820, padding:'0 32px' }}>
+      <div style={{ padding:'28px 0 16px', display:'flex', justifyContent:'space-between', alignItems:'flex-end' }}>
+        <div>
+          <h1 style={{ margin:0, fontSize:24, fontWeight:800, color:C.text }}>Tu Consejero IA 🤖</h1>
+          <p style={{ margin:'4px 0 0', fontSize:13, color:C.sub }}>
+            {loadingDrive ? '⏳ Leyendo tus planillas de Drive...' : driveContext ? '✅ Planillas de Drive cargadas — respondo con tus datos reales' : '📋 Sube planillas en Drive para análisis automático'}
+          </p>
+        </div>
+        <button onClick={clearHistory} style={{ background:'transparent', border:`1px solid ${C.border}`, color:C.sub, borderRadius:8, padding:'6px 12px', fontSize:12, cursor:'pointer' }}>🗑 Limpiar chat</button>
       </div>
+
       <div style={{ flex:1, overflowY:'auto', display:'flex', flexDirection:'column', gap:16, paddingBottom:16 }}>
         {msgs.map((m,i)=>(
           <div key={i} style={{ display:'flex', justifyContent:m.role==='user'?'flex-end':'flex-start', gap:12, alignItems:'flex-start' }}>
@@ -611,14 +715,132 @@ Responde con emojis, máx 200 palabras, español chileno natural. Da siempre un 
         ))}
         <div ref={endRef}/>
       </div>
+
       <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:12 }}>
         {SUGERENCIAS.map(s=><button key={s} onClick={()=>send(s)} style={{ background:C.white, border:`1px solid ${C.border}`, color:C.text, borderRadius:20, padding:'6px 14px', fontSize:12, cursor:'pointer', boxShadow:`0 1px 3px ${C.shadow}` }}>{s}</button>)}
       </div>
+
       <div style={{ display:'flex', gap:12, paddingBottom:28 }}>
         <textarea value={inp} onChange={e=>setInp(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send(inp)}}} placeholder="Escribe tu pregunta... (Enter para enviar)" rows={2} style={{ flex:1, background:C.white, border:`1.5px solid ${loading?C.border:C.teal}`, color:C.text, borderRadius:12, padding:'12px 16px', fontSize:14, fontFamily:'inherit', outline:'none', resize:'none', boxShadow:`0 1px 4px ${C.shadow}` }}/>
         <button onClick={()=>send(inp)} disabled={loading||!inp.trim()} style={{ background:loading||!inp.trim()?C.border:C.teal, color:'#fff', border:'none', borderRadius:12, padding:'12px 20px', fontSize:14, fontWeight:700, cursor:loading||!inp.trim()?'default':'pointer' }}>Enviar</button>
       </div>
       <style>{`@keyframes dots{0%,100%{opacity:.2;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}`}</style>
+    </div>
+  )
+}
+
+// ── Buscador de Insumos ───────────────────────────────────────────
+function Buscador({ user, folders }) {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [searched, setSearched] = useState(false)
+
+  const buscar = async () => {
+    if (!query.trim()) return
+    setLoading(true); setSearched(true); setResults([])
+
+    const invFolder = folders.find(f=>f.name==='Inventario Proveedores')
+    if (!invFolder || user.token==='demo') {
+      setResults([{ tipo:'info', texto:'Sube archivos en la carpeta "Inventario Proveedores" en Drive para buscar insumos.' }])
+      setLoading(false); return
+    }
+
+    let found = []
+    try {
+      for (const file of invFolder.files) {
+        if (!file.mimeType.includes('spreadsheet')) continue
+        const content = await driveReadContent(user.token, file)
+        const lines = content.split('\n')
+        for (const line of lines) {
+          if (line.toLowerCase().includes(query.toLowerCase())) {
+            const cols = line.split(',')
+            found.push({
+              archivo: file.name,
+              fecha: cols[0]?.trim() || '',
+              insumo: cols[1]?.trim() || line.slice(0,60),
+              proveedor: cols[2]?.trim() || '',
+              precio: cols[3]?.trim() || '',
+              cantidad: cols[4]?.trim() || '',
+              total: cols[5]?.trim() || '',
+            })
+          }
+        }
+      }
+    } catch(e) { console.error(e) }
+
+    setResults(found.length > 0 ? found : [{ tipo:'empty' }])
+    setLoading(false)
+  }
+
+  return (
+    <div style={{ padding:'32px', maxWidth:880 }}>
+      <div style={{ marginBottom:24 }}>
+        <h1 style={{ margin:0, fontSize:24, fontWeight:800, color:C.text }}>Buscador de Insumos 🔍</h1>
+        <p style={{ margin:'4px 0 0', fontSize:14, color:C.sub }}>Encuentra a qué proveedor le compraste cada insumo y a qué precio</p>
+      </div>
+
+      <div style={{ display:'flex', gap:12, marginBottom:20 }}>
+        <input
+          value={query}
+          onChange={e=>setQuery(e.target.value)}
+          onKeyDown={e=>e.key==='Enter'&&buscar()}
+          placeholder="Ej: anestesia, composite, fresas, guantes..."
+          style={{ flex:1, background:C.white, border:`1.5px solid ${C.teal}`, color:C.text, borderRadius:12, padding:'14px 18px', fontSize:15, fontFamily:'inherit', outline:'none', boxShadow:`0 1px 4px ${C.shadow}` }}
+        />
+        <button onClick={buscar} disabled={loading||!query.trim()} style={{ background:loading?C.border:C.teal, color:'#fff', border:'none', borderRadius:12, padding:'14px 24px', fontSize:15, fontWeight:700, cursor:'pointer' }}>
+          {loading ? 'Buscando...' : '🔍 Buscar'}
+        </button>
+      </div>
+
+      <div style={{ background:C.goldL, borderRadius:12, padding:'12px 16px', marginBottom:20, border:`1px solid ${C.gold}33`, fontSize:13, color:C.text }}>
+        💡 Los resultados vienen de tus archivos en <strong>Inventario Proveedores</strong> en Drive. Entre más detallado tengas el inventario, mejor la búsqueda.
+      </div>
+
+      {searched && (
+        <div>
+          {loading && <div style={{ textAlign:'center', padding:40, color:C.sub }}>Buscando en tus archivos de Drive...</div>}
+          {!loading && results[0]?.tipo==='empty' && (
+            <div style={{ background:C.white, borderRadius:16, padding:'40px', textAlign:'center', border:`2px dashed ${C.border}` }}>
+              <div style={{ fontSize:40, marginBottom:12 }}>🔍</div>
+              <div style={{ fontSize:15, fontWeight:600, color:C.text, marginBottom:6 }}>No encontré "{query}"</div>
+              <div style={{ fontSize:13, color:C.sub }}>Prueba con otro término o revisa que hayas subido archivos a Inventario Proveedores</div>
+            </div>
+          )}
+          {!loading && results[0]?.tipo==='info' && (
+            <div style={{ background:C.tealL, borderRadius:16, padding:'24px', textAlign:'center', border:`1px solid ${C.teal}33` }}>
+              <div style={{ fontSize:32, marginBottom:8 }}>📦</div>
+              <div style={{ fontSize:14, color:C.tealD }}>{results[0].texto}</div>
+            </div>
+          )}
+          {!loading && results.length>0 && !results[0]?.tipo && (
+            <div>
+              <div style={{ fontSize:13, color:C.sub, marginBottom:12 }}>{results.length} resultado{results.length>1?'s':''} encontrado{results.length>1?'s':''} para "<strong>{query}</strong>"</div>
+              <div style={{ background:C.white, borderRadius:16, border:`1px solid ${C.border}`, overflow:'hidden', boxShadow:`0 1px 6px ${C.shadow}` }}>
+                {results.map((r,i)=>(
+                  <div key={i} style={{ padding:'16px 20px', borderBottom:i<results.length-1?`1px solid ${C.border}`:'none' }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:8 }}>
+                      <div>
+                        <div style={{ fontSize:14, fontWeight:700, color:C.text, marginBottom:4 }}>{r.insumo}</div>
+                        <div style={{ fontSize:12, color:C.sub }}>📅 {r.fecha} · 📁 {r.archivo}</div>
+                      </div>
+                      <div style={{ textAlign:'right' }}>
+                        <div style={{ fontSize:16, fontWeight:800, color:C.teal }}>{r.precio ? clp(parseInt(r.precio.replace(/\D/g,''))||0) : '—'}</div>
+                        <div style={{ fontSize:11, color:C.sub }}>precio unitario</div>
+                      </div>
+                    </div>
+                    <div style={{ display:'flex', gap:16 }}>
+                      {r.proveedor&&<span style={{ fontSize:12, background:C.tealL, color:C.tealD, padding:'3px 10px', borderRadius:20, fontWeight:600 }}>🏪 {r.proveedor}</span>}
+                      {r.cantidad&&<span style={{ fontSize:12, background:C.bg, color:C.sub, padding:'3px 10px', borderRadius:20 }}>Cantidad: {r.cantidad}</span>}
+                      {r.total&&<span style={{ fontSize:12, background:C.goldL, color:C.gold, padding:'3px 10px', borderRadius:20, fontWeight:600 }}>Total: {r.total}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -629,12 +851,14 @@ function MiDrive({ user, folders, loading, onRefresh, onAnalyze }) {
   const [reading, setReading] = useState(null)
   const activeF = folders.find(f=>f.id===sel)
   const canRead = (m) => m.includes('spreadsheet')||m.includes('document')||m.includes('text')||m.includes('csv')
+
   const readAndAnalyze = async (file) => {
     setReading(file.id)
     try { const text = await driveReadContent(user.token, file); onAnalyze(text, file.name) }
     catch(e) { alert('Error al leer: '+e.message) }
     setReading(null)
   }
+
   return (
     <div style={{ padding:'32px', maxWidth:900 }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:24 }}>
@@ -648,7 +872,7 @@ function MiDrive({ user, folders, loading, onRefresh, onAnalyze }) {
       <div style={{ background:C.goldL, borderRadius:14, padding:'14px 18px', marginBottom:20, border:`1px solid ${C.gold}33`, display:'flex', gap:12 }}>
         <span style={{ fontSize:20 }}>💡</span>
         <div style={{ fontSize:13, color:C.text, lineHeight:1.6 }}>
-          <strong>¿Cómo usar tus planillas?</strong> Abre Google Drive → carpeta <strong>DentaIQ</strong> → abre la planilla del mes → borra las filas de ejemplo → agrega tus propios datos. Luego haz clic en <strong>🤖 Analizar con IA</strong> aquí.
+          <strong>¿Cómo usar?</strong> Abre Drive → carpeta <strong>DentaIQ</strong> → abre la planilla → borra los ejemplos → agrega tus datos reales. El Consejero IA los lee automáticamente al abrir.
         </div>
       </div>
 
@@ -659,7 +883,7 @@ function MiDrive({ user, folders, loading, onRefresh, onAnalyze }) {
           {folders.map(f=>(
             <button key={f.id} onClick={()=>setSel(sel===f.id?null:f.id)} style={{ background:sel===f.id?C.tealL:C.white, border:`2px solid ${sel===f.id?C.teal:C.border}`, borderRadius:14, padding:'16px 10px', textAlign:'center', cursor:'pointer', boxShadow:`0 1px 4px ${C.shadow}` }}>
               <div style={{ fontSize:28, marginBottom:6 }}>{f.emoji}</div>
-              <div style={{ fontSize:13, color:sel===f.id?C.tealD:C.text, fontWeight:600, marginBottom:3 }}>{f.name}</div>
+              <div style={{ fontSize:12, color:sel===f.id?C.tealD:C.text, fontWeight:600, marginBottom:3 }}>{f.name}</div>
               <div style={{ fontSize:11, color:f.files.length>0?C.teal:C.light }}>{f.files.length>0?`${f.files.length} archivo${f.files.length>1?'s':''}`:'Vacía'}</div>
             </button>
           ))}
@@ -667,12 +891,12 @@ function MiDrive({ user, folders, loading, onRefresh, onAnalyze }) {
 
         {activeF&&(
           <div style={{ background:C.white, borderRadius:16, border:`1px solid ${C.border}`, overflow:'hidden', boxShadow:`0 1px 6px ${C.shadow}` }}>
-            <div style={{ padding:'14px 20px', borderBottom:`1px solid ${C.border}`, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+            <div style={{ padding:'14px 20px', borderBottom:`1px solid ${C.border}`, display:'flex', justifyContent:'space-between' }}>
               <span style={{ fontSize:15, fontWeight:700, color:C.text }}>{activeF.emoji} {activeF.name}</span>
               <span style={{ fontSize:12, color:C.sub }}>{activeF.files.length} archivos</span>
             </div>
             {activeF.files.length===0
-              ?<div style={{ padding:'32px', textAlign:'center' }}><div style={{ fontSize:32, marginBottom:8 }}>📂</div><div style={{ fontSize:14, color:C.sub }}>Carpeta vacía. Actualiza para ver tus archivos.</div></div>
+              ?<div style={{ padding:'32px', textAlign:'center' }}><div style={{ fontSize:32, marginBottom:8 }}>📂</div><div style={{ fontSize:14, color:C.sub }}>Carpeta vacía. Sube archivos desde Google Drive.</div></div>
               :activeF.files.map((f,i)=>(
                 <div key={f.id} style={{ display:'flex', alignItems:'center', gap:12, padding:'12px 20px', borderBottom:i<activeF.files.length-1?`1px solid ${C.border}`:'none' }}>
                   <span style={{ fontSize:22 }}>{f.mimeType.includes('spreadsheet')?'📊':f.mimeType.includes('document')?'📝':f.mimeType.includes('pdf')?'📕':'📄'}</span>
@@ -696,6 +920,7 @@ const NAV = [
   { id:'inicio', label:'Inicio', icon:'🏠' },
   { id:'numeros', label:'Mis Números', icon:'📊' },
   { id:'ia', label:'Consejero IA', icon:'🤖' },
+  { id:'buscador', label:'Buscador', icon:'🔍' },
   { id:'drive', label:'Mi Drive', icon:'☁️' },
 ]
 
@@ -715,22 +940,28 @@ export default function App() {
       return
     }
     setDriveLoading(true)
-    try {
-      const f = await setupDrive(token)
-      setFolders(f)
-    } catch(e) { console.error(e) }
+    try { const f = await setupDrive(token); setFolders(f) } catch(e) { console.error(e) }
     setDriveLoading(false)
   }, [])
 
-  const generateSummary = useCallback(async (currentTxs, currentFolders, userName) => {
+  const generateSummary = useCallback(async (currentFolders, userName, token) => {
+    if (token === 'demo') return
     setLoadingAI(true)
-    const ing = currentTxs.filter(t=>t.tipo==='I').reduce((s,t)=>s+t.monto,0)
-    const gas = currentTxs.filter(t=>t.tipo==='G').reduce((s,t)=>s+t.monto,0)
-    const totalFiles = currentFolders.reduce((s,f)=>s+f.files.length,0)
     try {
+      let driveCtx = ''
+      for (const folder of currentFolders) {
+        if (folder.name==='Ingresos'||folder.name==='Gastos') {
+          for (const file of folder.files.slice(0,1)) {
+            if (file.mimeType.includes('spreadsheet')) {
+              const c = await driveReadContent(token, file)
+              driveCtx += `\n${folder.name}: ${c.slice(0,2000)}`
+            }
+          }
+        }
+      }
       const summary = await askAI(
-        [{ role:'user', content:'Dame un resumen financiero breve de mi clínica.' }],
-        `Consejero de ${userName}, dentista chileno/a. Ingresos ${clp(ing)}, Gastos ${clp(gas)}, Balance ${clp(ing-gas)}. Archivos en Drive: ${totalFiles}. Máx 3 oraciones simples y un consejo concreto.`
+        [{ role:'user', content:'Dame un resumen financiero breve de mi clínica dental.' }],
+        `Consejero de ${userName}, clínica dental Chile. ${driveCtx ? 'Datos de Drive: '+driveCtx : 'Sin datos aún.'} Máx 3 oraciones simples y un consejo concreto. Español chileno.`
       )
       setAiSummary(summary)
     } catch {}
@@ -742,18 +973,21 @@ export default function App() {
     await loadDrive(u.token)
     const seen = localStorage.getItem(`dentaiq_onboarded_${u.email}`)
     setOnboarded(!!seen)
-    if (seen) generateSummary([], [], u.name)
   }
 
   const handleOnboardingDone = () => {
     if (user) localStorage.setItem(`dentaiq_onboarded_${user.email}`, '1')
     setOnboarded(true)
-    generateSummary(txs, folders, user?.name||'')
+    generateSummary(folders, user?.name||'', user?.token||'')
   }
 
-  const handleAnalyzeFile = useCallback((content, fileName) => {
-    setTab('ia')
-  }, [])
+  useEffect(() => {
+    if (user && onboarded && folders.length > 0) {
+      generateSummary(folders, user.name, user.token)
+    }
+  }, [folders, onboarded])
+
+  const handleAnalyzeFile = useCallback(() => { setTab('ia') }, [])
 
   if (!user) return <Welcome onLogin={handleLogin}/>
   if (!onboarded) return <Onboarding user={user} onDone={handleOnboardingDone}/>
@@ -771,14 +1005,15 @@ export default function App() {
         ::-webkit-scrollbar-thumb{background:rgba(0,0,0,0.15);border-radius:4px}
       `}</style>
 
+      {/* Sidebar */}
       <div style={{ width:220, flexShrink:0, background:C.white, borderRight:`1px solid ${C.border}`, display:'flex', flexDirection:'column', boxShadow:`1px 0 4px ${C.shadow}` }}>
-        <div style={{ padding:'22px 20px 18px', borderBottom:`1px solid ${C.border}` }}>
-          <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:14 }}>
-            <div style={{ width:36, height:36, borderRadius:10, background:C.teal, display:'flex', alignItems:'center', justifyContent:'center', fontSize:20 }}>🦷</div>
-            <div><div style={{ fontSize:16, fontWeight:800, color:C.text }}>DentaIQ</div><div style={{ fontSize:10, color:C.sub }}>Tu gerente financiero</div></div>
+        <div style={{ padding:'20px 18px 16px', borderBottom:`1px solid ${C.border}` }}>
+          <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12 }}>
+            <div style={{ width:34, height:34, borderRadius:10, background:C.teal, display:'flex', alignItems:'center', justifyContent:'center', fontSize:18 }}>🦷</div>
+            <div><div style={{ fontSize:15, fontWeight:800, color:C.text }}>DentaIQ</div><div style={{ fontSize:10, color:C.sub }}>Tu gerente financiero</div></div>
           </div>
-          <div style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', background:C.bg, borderRadius:10, border:`1px solid ${C.border}` }}>
-            {user.picture?<img src={user.picture} style={{ width:26, height:26, borderRadius:'50%' }}/>:<div style={{ width:26, height:26, borderRadius:'50%', background:C.teal, display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, color:'#fff', fontWeight:700 }}>{user.name[0]}</div>}
+          <div style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 9px', background:C.bg, borderRadius:10, border:`1px solid ${C.border}` }}>
+            {user.picture?<img src={user.picture} style={{ width:24, height:24, borderRadius:'50%' }}/>:<div style={{ width:24, height:24, borderRadius:'50%', background:C.teal, display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, color:'#fff', fontWeight:700 }}>{user.name[0]}</div>}
             <div style={{ minWidth:0 }}>
               <div style={{ fontSize:12, color:C.text, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{user.name.split(' ')[0]}</div>
               <div style={{ fontSize:10, color:C.sub, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{user.email}</div>
@@ -786,12 +1021,12 @@ export default function App() {
           </div>
         </div>
 
-        <div style={{ flex:1, padding:'12px 10px', display:'flex', flexDirection:'column', gap:4 }}>
+        <div style={{ flex:1, padding:'10px 8px', display:'flex', flexDirection:'column', gap:3 }}>
           {NAV.map(item=>{
             const active = tab===item.id
             return (
-              <button key={item.id} onClick={()=>setTab(item.id)} style={{ display:'flex', alignItems:'center', gap:10, padding:'11px 12px', borderRadius:10, background:active?C.tealL:'transparent', border:active?`1px solid ${C.teal}33`:'1px solid transparent', color:active?C.tealD:C.sub, cursor:'pointer', fontSize:14, fontWeight:active?700:400, textAlign:'left' }}>
-                <span style={{ fontSize:18 }}>{item.icon}</span>
+              <button key={item.id} onClick={()=>setTab(item.id)} style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 11px', borderRadius:10, background:active?C.tealL:'transparent', border:active?`1px solid ${C.teal}33`:'1px solid transparent', color:active?C.tealD:C.sub, cursor:'pointer', fontSize:13, fontWeight:active?700:400, textAlign:'left' }}>
+                <span style={{ fontSize:17 }}>{item.icon}</span>
                 {item.label}
                 {item.id==='drive'&&totalFiles>0&&<span style={{ marginLeft:'auto', background:C.teal, color:'#fff', borderRadius:20, padding:'1px 7px', fontSize:10, fontWeight:700 }}>{totalFiles}</span>}
                 {item.id==='ia'&&<span style={{ marginLeft:'auto', background:C.greenL, color:C.green, borderRadius:20, padding:'1px 7px', fontSize:10, fontWeight:700 }}>ON</span>}
@@ -800,15 +1035,17 @@ export default function App() {
           })}
         </div>
 
-        <div style={{ padding:'14px 16px', borderTop:`1px solid ${C.border}` }}>
+        <div style={{ padding:'12px 14px', borderTop:`1px solid ${C.border}` }}>
           <button onClick={()=>setUser(null)} style={{ width:'100%', background:'transparent', color:C.sub, border:`1px solid ${C.border}`, borderRadius:8, padding:'7px', fontSize:12, cursor:'pointer' }}>Cerrar sesión</button>
         </div>
       </div>
 
+      {/* Contenido */}
       <div style={{ flex:1, overflowY:'auto' }}>
         {tab==='inicio'&&<Dashboard user={user} txs={txs} folders={folders} aiSummary={aiSummary} loadingAI={loadingAI}/>}
         {tab==='numeros'&&<MisNumeros txs={txs} setTxs={setTxs}/>}
         {tab==='ia'&&<Consejero user={user} txs={txs} folders={folders}/>}
+        {tab==='buscador'&&<Buscador user={user} folders={folders}/>}
         {tab==='drive'&&<MiDrive user={user} folders={folders} loading={driveLoading} onRefresh={()=>user&&loadDrive(user.token)} onAnalyze={handleAnalyzeFile}/>}
       </div>
     </div>
